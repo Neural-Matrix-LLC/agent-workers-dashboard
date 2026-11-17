@@ -1,0 +1,62 @@
+# Copy to agents.yaml and edit. Secrets are not kept here: they go in .env (see .env.example).
+
+hub:
+  bind: 127.0.0.1:8700        # for other machines, bind a Tailscale or LAN address (never a public one)
+  # bind: ["100.x.y.z:8700", "192.168.0.10:8700"]   # a list listens on several addresses at once
+  db: ./agent-hub.db
+  # url: http://100.x.y.z:8700   # the address connectors dial, if it differs from bind
+
+rooms:
+  - id: room:main
+    mode: mention             # mention | round_robin | moderated
+    fanout: sequential        # how an owner @all is delivered: sequential | parallel
+    # moderator: claude       # for mode: moderated
+
+limits:
+  max_hops: 8                 # agent-to-agent steps before the hub stops waking and asks the owner
+  turns_per_minute: 6         # per agent; extra wakes wait
+  agent_all: false            # true lets an agent's @all wake the other agents
+  approval_mode: false        # true makes agent-to-agent wakes wait for the owner's approval
+
+agents:
+  # Token for each agent: `agent-hub token <id>`, or set HUB_<ID>_TOKEN in .env.
+
+  - id: claude
+    connector: claude-code      # on ml3090; see docs/AGENT-SETUP.md
+    description: Coding agent. Plans, edits, tests, and (when told) commits and pushes branches in /home/thomas/projects.
+    workdir: /home/thomas/projects
+    permission_mode: plan       # starting mode; change it on Claude's card: plan | manual | acceptEdits | auto
+    sandbox: true               # Bash sandbox; needs: sudo apt install bubblewrap socat
+    permission_timeout: 10m     # an unanswered Allow/Deny counts as Deny after this
+    # model: sonnet             # optional; default is your Claude Code default model
+    budget: {usd_per_day: 10}
+
+  - id: hermes
+    connector: hermes           # the connector runs on ml3060, next to Hermes; see docs/AGENT-SETUP.md
+    description: QA on ml3060. Fetches a pushed branch, runs the tests and checks, reports PASS or FAIL.
+    api_base: http://127.0.0.1:8642/v1
+    api_key_env: HERMES_API_KEY
+    budget: {turns_per_day: 100}  # Hermes reports no cost, so budget in turns
+
+  - id: grok
+    connector: none             # self-driven: Grok Bot calls /mcp itself
+    delivery: webhook           # webhook | poll
+    webhook_url_env: GROK_WEBHOOK_URL
+    webhook_key_env: GROK_WEBHOOK_KEY
+    turn_timeout: 10m
+    description: Second opinions and critique.
+    budget: {turns_per_day: 50}
+
+  # A bare model behind an OpenAI-compatible API (Ollama, llama.cpp, https://api.x.ai/v1):
+  # - id: local
+  #   connector: openai-compat
+  #   description: Local model for quick drafts.
+  #   api_base: http://127.0.0.1:11434/v1
+  #   model: qwen3:14b
+  #   api_key_env: LOCAL_API_KEY        # optional
+  #   max_tool_rounds: 8
+
+  # Replies with what it received. For trying the hub and the UI:
+  # - id: echo
+  #   connector: echo
+  #   description: Echoes messages.

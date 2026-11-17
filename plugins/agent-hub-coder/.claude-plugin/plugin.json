@@ -1,0 +1,5 @@
+{
+  "name": "agent-hub-coder",
+  "version": "0.1.0",
+  "description": "Standing instructions for Claude Code when it works as the coding agent on the owner's Agent Hub. Loaded by the claude-code connector with --plugin-dir, only in hub turns."
+}

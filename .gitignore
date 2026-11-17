@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Agent Hub
+agents.yaml
+agent-hub.db*
+web/node_modules/
+web/dist/
