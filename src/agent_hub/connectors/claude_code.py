@@ -72,7 +72,7 @@ class ClaudeCodeConnector(Connector):
     def __init__(self, *args):
         super().__init__(*args)
         self.procs: dict[str, asyncio.subprocess.Process] = {}
-        workdir = Path(self.options.get("workdir", ".")).expanduser()
+        workdir = Path(self.options.get("workdir", ".")).expanduser()   # noqa: ASYNC240 (no disk access)
         if not workdir.is_dir():
             raise SystemExit(f"workdir {workdir} of agent '{self.agent.id}' does not exist. "
                              "Create it or change workdir in agents.yaml.")
@@ -159,7 +159,7 @@ class ClaudeCodeConnector(Connector):
                           tokens_in or None, usage.get("output_tokens"))
 
     async def _run(self, wake: Wake, trace: TraceSink, session: str | None) -> dict | None:
-        workdir = Path(self.options.get("workdir", ".")).expanduser()
+        workdir = Path(self.options.get("workdir", ".")).expanduser()   # noqa: ASYNC240 (no disk access)
         proc = await asyncio.create_subprocess_exec(
             *self._command(session, wake), cwd=workdir,
             env={**scrubbed_env(), "MCP_TOOL_TIMEOUT": str(int(self.agent.permission_timeout + 120) * 1000)},

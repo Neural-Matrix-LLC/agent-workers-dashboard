@@ -148,6 +148,7 @@ Uncomment the `echo` agent at the end of `agents.yaml`, set `HUB_ECHO_TOKEN`, an
 | `uv run agent-hub connect <agent> --hub http://<host>:8700` | Runs a connector on a machine other than the hub's. It needs `agents.yaml` and that agent's token there. |
 | `uv run agent-hub --config <file> serve` | Uses another config file. `$AGENT_HUB_CONFIG` does the same. |
 | `uv run pytest` | Runs the tests, including the visibility matrix. |
+| `uv run ruff check .` | Runs the linter. |
 
 ## Read this before running it
 
@@ -179,6 +180,8 @@ Uncomment the `echo` agent at the end of `agents.yaml`, set `HUB_ECHO_TOKEN`, an
 - [Agent setup](docs/AGENT-SETUP.md): installing and connecting Claude Code on ml3090 (coding agent: modes,
   Allow/Deny, safety rules) and Hermes on ml3060 (QA agent), Grok Bot, a bare model through
   `openai-compat`, keeping everything running with systemd, and adding another harness.
+- [QA plan](docs/QA-PLAN.md): what the automated tests cover, and the acceptance checks to run by hand
+  before release, including the ones not yet run (sandbox, ml3060, real Hermes and Grok Bot).
 - [Grok Bot test driver](docs/GROK-BOT-TEST-DRIVER.md): the stub used to check Grok Bot connectivity before
   the hub existed. It is still useful for testing a new Grok Bot connector or webhook routine in isolation.
 - Skills (standing instructions for each agent):
@@ -186,3 +189,5 @@ Uncomment the `echo` agent at the end of `agents.yaml`, set `HUB_ECHO_TOKEN`, an
     its connector.
   - [agent-hub-qa](skills/hermes-qa/SKILL.md) for Hermes, installed in `~/.hermes/skills/` on ml3060.
   - [Agent-Hub](skills/agent-hub/SKILL.md) for Grok Bot, installed in Grok Bot.
+- [Archive](docs/archive/2026-11-17-claude-coder-report.md): the 2026-11-17 report on the Claude coding agent
+  and the Hermes QA skill.

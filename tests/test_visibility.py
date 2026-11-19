@@ -132,7 +132,8 @@ async def test_matrix_webhook_ping_has_no_message_text(hub_env):
         for ping in env.pings:
             assert set(ping["body"]) == {"event", "agent", "conversation_id", "turn_id", "unread"}
             assert ping["body"]["agent"] == "grok"
-            assert "grok" in ping["body"]["conversation_id"].split(":") or ping["body"]["conversation_id"] == "room:main"
+            conversation_id = ping["body"]["conversation_id"]
+            assert "grok" in conversation_id.split(":") or conversation_id == "room:main"
             assert_clean("grok", ping["body"], markers, "webhook ping")
             assert "MARK" not in json.dumps(ping["body"])
             assert ping["url"] == "https://grok.example/hook" and ping["auth"] == "Bearer sender-key"

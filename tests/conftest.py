@@ -11,7 +11,7 @@ from agent_hub.config import Config
 from agent_hub.core.hub import Hub
 from agent_hub.server.app import create_app
 
-TOKENS = {"claude": "tok-claude", "hermes": "tok-hermes", "grok": "tok-grok"}
+TOKENS = {"claude": "tok-claude", "hermes": "tok-hermes", "grok": "tok-grok", "local": "tok-local"}
 PASSWORD = "owner-pw"
 
 
@@ -21,6 +21,12 @@ class Env:
     http: httpx.AsyncClient                    # talks to the hub app
     pings: list = field(default_factory=list)  # webhook pings the hub sent
     ping_status: list = field(default_factory=list)   # statuses to answer with, then 200
+    app: object = None                         # the ASGI app, for clients that must reach the hub
+
+    def client(self, agent: str) -> httpx.AsyncClient:
+        """An HTTP client with this agent's token, as a connector holds it."""
+        return httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://hub",
+                                 headers=self.auth(agent))
 
     def auth(self, agent: str) -> dict:
         return {"Authorization": f"Bearer {TOKENS[agent]}"}
@@ -111,6 +117,6 @@ def hub_env(tmp_path, monkeypatch):
                          http=httpx.AsyncClient(transport=httpx.MockTransport(webhook)))
         async with app.api.router.lifespan_context(app.api):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://hub") as http:
-                yield Env(app.state.hub, http, pings, statuses)
+                yield Env(app.state.hub, http, pings, statuses, app)
 
     return start

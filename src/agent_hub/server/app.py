@@ -21,7 +21,8 @@ from .mcp_server import build_mcp
 from .owner_api import build_owner_api
 from .ws import build_ws
 
-NO_UI = "<h1>Agent Hub</h1><p>The UI is not built. Run <code>npm install && npm run build</code> in <code>web/</code>.</p>"
+NO_UI = ("<h1>Agent Hub</h1><p>The UI is not built. "
+         "Run <code>npm install && npm run build</code> in <code>web/</code>.</p>")
 
 
 def web_dist() -> Path:

@@ -681,11 +681,26 @@ agents:
 Built: M1, M2, and M3. Not built: M4 (shared tasks) and M5 (A2A gateway, channels connector, Redis backend).
 Setup is in the [README](../README.md) and in [Agent setup](AGENT-SETUP.md).
 
-Verified by running it: the test suite (`uv run pytest`, which includes the visibility matrix of section 5);
-two `echo` agents stopped by the hop limit; a real Claude Code turn with a hub tool call and a resumed
-session; a self-driven agent using a real MCP client on `poll` delivery; the `hermes` and `openai-compat`
-connectors against a stand-in model server; the UI in a browser. Not yet run: the hub against the real
-Grok Bot (only the stub in the test driver has been), and the `hermes` connector against a real Hermes.
+Verified by running it: the test suite (`uv run pytest`, 88 tests, which includes the visibility matrix of
+section 5) and the linter (`uv run ruff check .`); two `echo` agents stopped by the hop limit; a real Claude
+Code turn with a hub tool call and a resumed session; a self-driven agent using a real MCP client on `poll`
+delivery; the UI in a browser.
+
+The test suite also covers the connector side: the shared connector loop (wake, trace, finish, fail, cancel,
+reconnect with back-off, exit on a refused token), the `hermes` and `openai-compat` connectors against a
+stand-in model server and a real hub, the permission helper run as a real stdio MCP server, `agents.yaml` and
+`.env` loading, and the `agent-hub` commands.
+
+Live run with real Claude Code on 2026-11-17 (about $0.20): Plan mode changed nothing; Manual mode with Deny
+changed nothing, and with Allow created the branch and file; reading `.env` was refused; in Auto mode the
+commit and push waited for Allow and reached the remote; pushes to `main`, to `HEAD:main`, and force pushes
+were refused. The run found two bugs, both fixed and covered by tests: Claude Code could not read the
+permission answer format, and a `git push` at the end of a long chained command was cut from the Allow/Deny
+text.
+
+Not yet run: the Claude Code sandbox (ml3090 has no `socat` yet), `git push` over SSH inside the sandbox, the
+hub against the real Grok Bot (only the stub in the test driver has been), and anything on ml3060, including
+the `hermes` connector against a real Hermes. The [QA plan](QA-PLAN.md) lists these checks.
 
 Where the code differs from this document:
 

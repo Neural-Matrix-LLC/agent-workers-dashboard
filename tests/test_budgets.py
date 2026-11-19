@@ -177,10 +177,12 @@ async def test_room_mode_can_be_changed_by_the_owner(hub_env):
         queue = await env.hub.connect(await env.agent("claude"))
         await env.owner_post("room:main", "nobody is mentioned")
         assert queue.empty()
-        assert (await env.http.put("/api/conversations/room:main/mode", json={"mode": "round_robin"})).status_code == 200
+        response = await env.http.put("/api/conversations/room:main/mode", json={"mode": "round_robin"})
+        assert response.status_code == 200
         await env.owner_post("room:main", "still nobody mentioned")
         assert queue.get_nowait()["event"] == "wake"
-        assert (await env.http.put("/api/conversations/dm:claude:owner/mode", json={"mode": "mention"})).status_code == 400
+        response = await env.http.put("/api/conversations/dm:claude:owner/mode", json={"mode": "mention"})
+        assert response.status_code == 400
 
 
 async def test_ui_budget_survives_restart_until_agents_yaml_changes(hub_env):

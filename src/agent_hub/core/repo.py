@@ -369,7 +369,8 @@ class Repo:
         return await self.turn(id)
 
     async def turns(self, where: str, params=(), order: str = "id") -> list[Turn]:
-        return [Turn.from_row(r) for r in await self._all(f"SELECT * FROM turns WHERE {where} ORDER BY {order}", params)]
+        rows = await self._all(f"SELECT * FROM turns WHERE {where} ORDER BY {order}", params)
+        return [Turn.from_row(r) for r in rows]
 
     async def open_turn(self, agent_id: str, conversation_id: str) -> Turn | None:
         found = await self.turns("agent_id = ? AND conversation_id = ? AND state IN ('queued','running')",

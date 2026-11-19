@@ -61,7 +61,8 @@ def build_mcp(state) -> FastMCP:
                           lambda agent: state.hub.read_messages(agent, conversation_id, after, limit))
 
     @mcp.tool()
-    async def post_message(ctx: Context, conversation_id: str, body: str, reply_to: str | None = None) -> dict[str, Any]:
+    async def post_message(ctx: Context, conversation_id: str, body: str,
+                           reply_to: str | None = None) -> dict[str, Any]:
         """Post to a conversation you belong to. Mention a participant as @id to give them a turn.
         The exact body NO_REPLY closes your turn and stores nothing."""
         args = {"conversation_id": conversation_id, "body": body, "reply_to": reply_to}
