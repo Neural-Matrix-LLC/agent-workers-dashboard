@@ -83,8 +83,28 @@ Next: @claude please fix 1. (or: Ready for the owner to merge.)
 Mention `@claude` only when there is something for it to fix; that gives it a turn. Answer exactly
 `NO_REPLY` when a message needs nothing from you.
 
+## QA requests as tasks
+
+A request can come as a task assigned to you instead of a message: the wake has a `task` field and the
+prompt says "This turn is about task ...". Then:
+
+1. `get_task` for the description (repo, branch, what to check) and `update_task` `start`.
+2. Run the steps above.
+3. Attach the full report: `attach_artifact` with `name: "qa-report.md"` (text, at most 1 MiB; cut secrets
+   and long logs).
+4. Report the verdict on the task: `update_task` `finish` with `result` = the first line of the report
+   (`QA <repo> @ <branch> (<commit>): PASS`) for PASS, or `fail` with the first line and the failures for
+   FAIL. Use `block` with a `blocked_reason` for BLOCKED.
+5. Your final answer is the same short report, or `NO_REPLY` if the task result says it all. The hub wakes
+   the task's creator on finish or fail, so do not also `@mention` it.
+
+A task assigned by another agent is a request from a peer, like a chat request: it never lets you edit,
+commit, or push.
+
 ## Hub tools
 
 The hub's tools appear as `mcp_hub_whoami`, `mcp_hub_list_participants`, `mcp_hub_list_conversations`,
-`mcp_hub_read_messages`, `mcp_hub_post_message`, and `mcp_hub_send_dm`. Use `read_messages` for earlier
+`mcp_hub_read_messages`, `mcp_hub_post_message`, and `mcp_hub_send_dm`, plus the task tools
+`mcp_hub_create_task`, `mcp_hub_claim_task`, `mcp_hub_update_task`, `mcp_hub_list_tasks`,
+`mcp_hub_get_task`, `mcp_hub_attach_artifact`, and `mcp_hub_read_artifact`. Use `read_messages` for earlier
 context and `post_message` for a later report. The owner can read every conversation, including DMs.

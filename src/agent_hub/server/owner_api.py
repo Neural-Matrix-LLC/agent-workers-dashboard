@@ -7,11 +7,14 @@ import os
 import time
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from ..config import Budget
 from ..core.models import HubError
+from .agent_api import TaskCreate, TaskUpdate, attach_from_request
+from .files import download
 
 COOKIE = "hub_session"
 SESSION_SECONDS = 30 * 24 * 3600
@@ -48,6 +51,26 @@ class Settings(BaseModel):
     approval_mode: bool
 
 
+class RoomCreate(BaseModel):
+    id: str
+    title: str | None = None
+    mode: Literal["mention", "round_robin", "moderated"] = "mention"
+    fanout: Literal["sequential", "parallel"] = "sequential"
+    moderator: str | None = None
+    members: list[str] | None = None
+
+
+class RoomPatch(BaseModel):
+    title: str | None = None
+    mode: Literal["mention", "round_robin", "moderated"] | None = None
+    fanout: Literal["sequential", "parallel"] | None = None
+    moderator: str | None = None
+
+
+class RoomMembers(BaseModel):
+    members: list[str]
+
+
 def build_owner_api(state) -> APIRouter:
     def owner(request: Request) -> None:
         if not valid_session(state.secret, request.cookies.get(COOKIE)):
@@ -81,11 +104,7 @@ def build_owner_api(state) -> APIRouter:
     async def conversations():
         hub = state.hub
         counts = await hub.repo.counts(hub.owner)
-        return [{"id": c.id, "kind": c.kind, "title": c.title, "mode": c.mode,
-                 "fanout": c.config.get("fanout"), "moderator": c.config.get("moderator"),
-                 "members": c.members, "observed": hub.owner.id not in c.members,
-                 "messages": counts.get(c.id, (0, None))[0], "last_message_id": counts.get(c.id, (0, None))[1]}
-                for c in await hub.repo.conversations(hub.owner)]
+        return [hub.room_view(c, counts) for c in await hub.repo.conversations(hub.owner)]
 
     @router.get("/conversations/{conversation_id}/messages")
     async def messages(conversation_id: str, before: str | None = None, limit: int = 100):
@@ -167,5 +186,73 @@ def build_owner_api(state) -> APIRouter:
     async def settings(body: Settings):
         await state.hub.set_approval_mode(body.approval_mode)
         return state.hub.settings_view()
+
+    # ---------------------------------------------------------------- task board (design M4 section 10.3)
+    def tasks():
+        return state.hub.task_service
+
+    @router.get("/tasks")
+    async def list_tasks(conversation_id: str | None = None, assignee: str | None = None,
+                         state_: list[str] | None = Query(None, alias="state"), parent_id: str | None = None,
+                         include_closed: bool = True, q: str | None = None, limit: int = 200,
+                         before: str | None = None):
+        hub = state.hub
+        page = await tasks().list_tasks(hub.owner, conversation_id=conversation_id, assignee=assignee,
+                                        state=state_, parent_id=parent_id, include_closed=include_closed,
+                                        limit=limit, before=before, q=q, max_limit=500)
+        return {**page, "counts": await hub.repo.task_counts(hub.owner)}
+
+    @router.get("/tasks/{task_id}")
+    async def get_task(task_id: str, events_limit: int = 200):
+        return await tasks().get(state.hub.owner, task_id, max(1, min(events_limit, 500)))
+
+    @router.post("/tasks", status_code=201)
+    async def create_task(body: TaskCreate):
+        return await tasks().create(state.hub.owner, body.conversation_id, title=body.title,
+                                    description=body.description, acceptance=body.acceptance,
+                                    assignee=body.assignee, parent_id=body.parent_id, priority=body.priority,
+                                    labels=body.labels)
+
+    @router.patch("/tasks/{task_id}")
+    async def update_task(task_id: str, body: TaskUpdate):
+        return await tasks().update(state.hub.owner, task_id, body.action, note=body.note, result=body.result,
+                                    blocked_reason=body.blocked_reason, assignee=body.assignee, fields=body.fields,
+                                    cascade=body.cascade, expected_version=body.expected_version, force=body.force)
+
+    @router.post("/tasks/{task_id}/artifacts")
+    async def attach(task_id: str, request: Request) -> JSONResponse:
+        return await attach_from_request(tasks(), state.hub.owner, task_id, request)
+
+    @router.get("/artifacts/{artifact_id}")
+    async def artifact_meta(artifact_id: str):
+        return await tasks().artifact_meta(state.hub.owner, artifact_id)
+
+    @router.get("/artifacts/{artifact_id}/content")
+    async def artifact_content(artifact_id: str, request: Request):
+        artifact, data = await tasks().artifact_content(state.hub.owner, artifact_id)
+        return download(artifact, data, request.headers.get("range"))
+
+    @router.delete("/artifacts/{artifact_id}")
+    async def delete_artifact(artifact_id: str):
+        return await tasks().delete_artifact(artifact_id)
+
+    # ---------------------------------------------------------------- rooms (design M5d section 21.4)
+    @router.post("/rooms", status_code=201)
+    async def create_room(body: RoomCreate):
+        return await state.hub.create_room(body.id, body.title, body.mode, body.fanout, body.moderator,
+                                           body.members)
+
+    @router.patch("/rooms/{room_id}")
+    async def update_room(room_id: str, body: RoomPatch):
+        # Only the fields the request sent; "moderator": null clears the moderator.
+        return await state.hub.update_room(room_id, {k: getattr(body, k) for k in body.model_fields_set})
+
+    @router.put("/rooms/{room_id}/members")
+    async def room_members(room_id: str, body: RoomMembers):
+        return await state.hub.set_room_members(room_id, body.members)
+
+    @router.post("/rooms/{room_id}/archive")
+    async def archive_room(room_id: str):
+        return await state.hub.archive_room(room_id)
 
     return public, router

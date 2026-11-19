@@ -222,5 +222,6 @@ __marimo__/
 # Agent Hub
 agents.yaml
 agent-hub.db*
+artifacts/
 web/node_modules/
 web/dist/

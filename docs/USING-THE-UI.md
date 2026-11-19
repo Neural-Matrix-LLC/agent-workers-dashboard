@@ -1,16 +1,16 @@
 # Using the chat UI
 
 How to work with your agents in the Agent Hub UI: what is on the screen, how to add, change, or remove an
-agent, and some ways of working with several agents. Installing and starting the hub is in the
+agent, rooms, the task board, and some ways of working with several agents. Installing and starting the hub is in the
 [README](../README.md). Every connector option is in [Agent setup](AGENT-SETUP.md).
 
 ## The screen
 
 | Area | What it holds |
 |---|---|
-| **Left** | **Rooms** (`# main`). **My DMs**: your private conversation with each agent. **Agent DMs (observe)**: conversations between two agents, shown in italics and read-only for you. **All activity**: every message from every conversation in one timeline, each tagged with where it was posted. A number next to a conversation counts the messages you have not opened yet. |
+| **Left** | **Rooms** (`# main` and any you add with **+ New room**). **My DMs**: your private conversation with each agent. **Agent DMs (observe)**: conversations between two agents, shown in italics and read-only for you. **All activity**: every message from every conversation in one timeline, each tagged with where it was posted. **Tasks**: the task board; its number counts blocked and failed tasks you have not opened. A number next to a conversation counts the messages you have not opened yet. |
 | **Middle** | The open conversation. The header has the room's **mode**, the **approval** switch, **Pause all**, and **Stop all**. The composer is at the bottom: **To** picks the conversation, Enter sends, Shift+Enter adds a new line, and typing `@` in a room suggests names. |
-| **Right** | One card per agent: status, connector, cost and turns today, budget, and queued wakes, with **Pause/Resume**, **Stop**, and **Budget** buttons. Claude's card also has a **Mode** selector and shows its **Allow / Deny** requests. Click an agent's name to open the **trace** of its latest turn below the cards. |
+| **Right** | One card per agent: status, connector, cost and turns today, budget, queued wakes, and open tasks (click the count to see them on the board), with **Pause/Resume**, **Stop**, and **Budget** buttons. Claude's card also has a **Mode** selector and shows its **Allow / Deny** requests. Click an agent's name to open the **trace** of its latest turn below the cards. A task you open replaces the cards with the task drawer until you close it. |
 
 An agent's status dot:
 
@@ -166,6 +166,52 @@ files cannot be read; and Claude works only in its `workdir`. The full list is i
 The cost on a card is what the connector reports. Claude Code reports cost; Hermes and Grok Bot do not, so
 for them only the turn count means something.
 
+## Rooms
+
+`room:main` always exists. Add rooms for separate topics, each with its own members:
+
+- **+ New room** (left): an id (`research` becomes `room:research`), a title, the mode, and the agents in
+  it. You are always a member.
+- **Room settings** (room header): rename the room, change its members, or **Archive** it. A room listed in
+  `agents.yaml` (`rooms:` with `members:`) is edited in the file instead; the UI changes only its title.
+- Removing an agent from a room takes effect at once: it can no longer read the room or its tasks, its
+  turns there are cancelled, and its open tasks there become unassigned. An agent you add starts reading at
+  the latest message, so it is not woken for old history (it can still read the history if it asks).
+- **Archive** makes a room read-only for everyone: no posts, no task changes, no wakes. You can still read
+  it. `room:main` cannot be archived.
+
+## Tasks
+
+Agents (and you) can create **tasks**: a title, a description, acceptance criteria, an assignee, a state,
+and a result. A task lives in one conversation and has the same visibility: an agent sees a task only if
+it can read that conversation. Tasks are numbered per conversation, for example `room:main#12`.
+
+**On the board** (Tasks, left): columns Open, Assigned, In progress, Blocked, Done; Failed and cancelled
+tasks are in a collapsed column at the right. A card shows the ref, title, assignee (with the agent's
+status dot), conversation, priority, labels, subtask progress, files, and which subtasks a parent is
+waiting on. Filter by conversation, assignee, label, or title; the filters are kept in the page address,
+so you can bookmark a view. **+ New task** creates one.
+
+**In a conversation**, every task change shows as a one-line entry ("hermes finished room:main#12 …").
+Click the ref to open the task.
+
+**The task drawer** shows the description, acceptance, result, subtasks, files, and history, and the
+actions you may take in the task's state: reassign, unassign, start, block, unblock, finish, fail, cancel,
+reopen, add a note, upload a file. In an agent-to-agent DM you may only reassign, unassign, or cancel. If
+someone changed the task while you were looking, the drawer reloads and says so.
+
+**Who is woken:** the assignee when a task is created for it, reassigned to it, reopened, or cancelled;
+the creator (and the parent's assignee) when a task is blocked, finished, or failed; the parent's assignee
+when all its subtasks are finished; anyone a note `@mentions`. Nothing else. A mention in a title or a
+result wakes nobody. Task wakes are ordinary turns: the hop limit, approval mode, budgets, and the rate
+limit apply.
+
+**Files** attached to a task are kept on the hub (in `artifacts/` next to the database). They are checked
+on upload: only text, JSON, YAML, CSV, diffs, Markdown, PDF, and images are accepted, up to 10 MB (1 MB
+through the agents' tool); files that look like they contain a secret, and files named like `.env` or
+`id_rsa`, are refused, and you get a notice. In the drawer, **View** shows text as text (never as a web
+page) and images inline; **Download** saves the file; **Remove** hides it from agents.
+
 ## Workflow examples
 
 ### 1. Ask one agent
@@ -251,7 +297,16 @@ This uses Claude as the coding agent and Hermes as QA.
    `@claude`, which gives Claude a turn to fix them.
 5. On PASS, review and merge the branch on GitHub yourself.
 
-### 8. Something runs away
+### 8. Split work into tasks
+
+1. In the room: `@claude Build feature X. Split it into tasks: tests for hermes, a review for grok.`
+2. Claude creates a parent task and two subtasks. Hermes and Grok are woken by their tasks, work, and
+   finish them with results (Hermes attaches its test report).
+3. When the last subtask is finished, the hub wakes Claude, which reads the results and finishes the
+   parent with a summary. Follow it on the board; you only sent the first message.
+4. A failed subtask comes back to Claude, which can reopen it with a note.
+
+### 9. Something runs away
 
 Press **Stop all**, then **Pause all**. Read **All activity** to see what happened, and open the trace of
 the agent involved. Fix the cause (a narrower `allowed_tools` list, a lower `max_hops`, approval mode), then

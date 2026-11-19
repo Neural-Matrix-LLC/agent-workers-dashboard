@@ -1,6 +1,7 @@
 # Agent Hub — Design
 
-**Status:** v0.3 (2026-11-16). Milestones M1 to M3 are implemented; see section 17.
+**Status:** v0.4 (2026-11-19). Milestones M1 to M4 and M5d are implemented; see section 17. M4 and M5 are
+designed in [M4 and M5 design](M4-M5-DESIGN.md).
 **Changes in v0.3:** The code exists. Section 17 lists what is built and where it differs from this document. Assumptions 1 and 2 in section 14 are updated.
 **Changes in v0.2:** Grok Bot joins as a self-driven agent that calls the hub and is woken by a webhook ping, with polling as the fallback (sections 6, 8.5, 9.4). An optional public route to `/mcp` is described (section 11).
 **Owner:** Neural Matrix LLC
@@ -678,10 +679,12 @@ agents:
 
 ## 17. Implementation status (v0.3)
 
-Built: M1, M2, and M3. Not built: M4 (shared tasks) and M5 (A2A gateway, channels connector, Redis backend).
+Built: M1, M2, M3, M4 (shared tasks, task files, task board), and M5d (multiple rooms). Not built: M5a (A2A
+gateway), M5b (Claude Code channels connector), M5c (Redis backend). M4 and M5 follow
+[M4 and M5 design](M4-M5-DESIGN.md); its section 24 lists where that code differs from it.
 Setup is in the [README](../README.md) and in [Agent setup](AGENT-SETUP.md).
 
-Verified by running it: the test suite (`uv run pytest`, 88 tests, which includes the visibility matrix of
+Verified by running it: the test suite (`uv run pytest`, 204 tests since M4, which includes the visibility matrix of
 section 5) and the linter (`uv run ruff check .`); two `echo` agents stopped by the hop limit; a real Claude
 Code turn with a hub tool call and a resumed session; a self-driven agent using a real MCP client on `poll`
 delivery; the UI in a browser.

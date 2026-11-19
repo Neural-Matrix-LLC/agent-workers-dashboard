@@ -1,50 +1,19 @@
-import DOMPurify from "dompurify";
-import { marked } from "marked";
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Agent, api, ApiError, connect, Conversation, HubEvent, Me, Message, Settings, Trace, TraceEvent } from "./api";
+import { Agent, api, ApiError, connect, Conversation, HubEvent, Me, Message, Settings, Task, Trace, TraceEvent } from "./api";
+import { RoomDialog, RoomMembers } from "./Rooms";
+import { boardFromHash, BoardFilters, boardHash, NO_FILTERS, TaskBoard } from "./TaskBoard";
+import { TaskDrawer } from "./TaskDrawer";
+import { ACTIVITY, conversationLabel, hue, readJson, renderMarkdown, TASKS, time, writeJson } from "./ui";
 
-const ACTIVITY = "activity";
 const MODE_NAMES: Record<string, string> = {
   plan: "Plan (no edits)", manual: "Manual (ask for everything)",
   acceptEdits: "Edit automatically", auto: "Auto (safety check decides)",
 };
 const SEEN_KEY = "agent-hub-seen";
+const SEEN_TASKS_KEY = "agent-hub-seen-tasks";       // task id -> version the owner last opened
 
 function loadSeen(): Record<string, number> | null {
-  try {
-    return JSON.parse(localStorage.getItem(SEEN_KEY) ?? "null");
-  } catch {
-    return null;
-  }
-}
-
-function hue(id: string): number {
-  let hash = 0;
-  for (const char of id) hash = (hash * 31 + char.charCodeAt(0)) % 360;
-  return hash;
-}
-
-function time(at: string): string {
-  const date = new Date(at);
-  const today = new Date().toDateString() === date.toDateString();
-  return today
-    ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-/** Agent output is untrusted: markdown is rendered, then sanitized. */
-function renderMarkdown(body: string): string {
-  return DOMPurify.sanitize(marked.parse(body, { breaks: true, async: false }) as string, {
-    FORBID_TAGS: ["style", "form", "input", "button", "iframe", "img"],
-  });
-}
-
-function conversationLabel(conversation: Conversation | undefined, id: string): string {
-  if (id === ACTIVITY) return "All activity";
-  if (!conversation) return id;
-  if (conversation.kind === "room") return `# ${conversation.title ?? id.replace(/^room:/, "")}`;
-  const members = conversation.members;
-  return conversation.observed ? members.join(" <> ") : members.filter((m) => m !== "owner").join(", ");
+  return readJson<Record<string, number> | null>(SEEN_KEY, null);
 }
 
 export function App() {
@@ -84,7 +53,7 @@ function Hub({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [settings, setSettings] = useState<Settings>(me.settings);
-  const [selected, setSelected] = useState("room:main");
+  const [selected, setSelected] = useState(() => (boardFromHash(location.hash) ? TASKS : "room:main"));
   const [messages, setMessages] = useState<Message[]>([]);
   const [seen, setSeen] = useState<Record<string, number> | null>(loadSeen);
   const [agentId, setAgentId] = useState<string | null>(null);
@@ -92,10 +61,18 @@ function Hub({ me, onLogout }: { me: Me; onLogout: () => void }) {
   const [tick, setTick] = useState(0);           // bumped when the live feed reconnects
   const [traceTick, setTraceTick] = useState(0);
   const [error, setError] = useState("");
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [filters, setFilters] = useState<BoardFilters>(() => boardFromHash(location.hash) ?? NO_FILTERS);
+  const [drawer, setDrawer] = useState<string | null>(null);       // the task open in the drawer
+  const [drawerTick, setDrawerTick] = useState(0);
+  const [seenTasks, setSeenTasks] = useState<Record<string, number>>(() => readJson(SEEN_TASKS_KEY, {}));
+  const [dialog, setDialog] = useState<"room" | "members" | null>(null);
   const selectedRef = useRef(selected);
   const agentRef = useRef(agentId);
+  const drawerRef = useRef(drawer);
   selectedRef.current = selected;
   agentRef.current = agentId;
+  drawerRef.current = drawer;
 
   const names = useMemo(() => Object.fromEntries(me.participants.map((p) => [p.id, p.display_name])), [me]);
   const run = useCallback(async (action: () => Promise<unknown>) => {
@@ -127,6 +104,11 @@ function Hub({ me, onLogout }: { me: Me; onLogout: () => void }) {
       } else if (event.type === "agents") setAgents(event.data);
       else if (event.type === "settings") setSettings(event.data);
       else if (event.type === "conversation") void loadConversations();
+      else if (event.type === "task") {
+        const task = event.data;
+        setTasks((list) => [task, ...list.filter((t) => t.id !== task.id)]);
+        if (drawerRef.current === task.id) setDrawerTick((n) => n + 1);
+      } else if (event.type === "artifact" && drawerRef.current === event.data.task_id) setDrawerTick((n) => n + 1);
       else if ((event.type === "trace" || event.type === "turn") && event.data.agent === agentRef.current) {
         setTraceTick((n) => n + 1);
       }
@@ -137,12 +119,29 @@ function Hub({ me, onLogout }: { me: Me; onLogout: () => void }) {
   useEffect(() => {
     void loadConversations();
     void run(async () => setAgents(await api.agents()));
+    void run(async () => setTasks((await api.tasks()).tasks));        // the board reloads on every reconnect
   }, [tick, loadConversations, run]);
 
   useEffect(() => {
     setMessages([]);
+    if (selected === TASKS) return;
     void run(async () => setMessages(selected === ACTIVITY ? await api.activity() : await api.messages(selected)));
   }, [selected, tick, run]);
+
+  useEffect(() => {
+    const hash = selected === TASKS ? boardHash(filters) : "";
+    if (location.hash !== hash) history.replaceState(null, "", hash || location.pathname + location.search);
+  }, [selected, filters]);
+
+  const markSeen = useCallback((task: string, version: number) => setSeenTasks((current) => {
+    if (current[task] === version) return current;
+    const next = { ...current, [task]: version };
+    writeJson(SEEN_TASKS_KEY, next);
+    return next;
+  }), []);
+  const taskAlerts = tasks.filter((t) => (t.state === "blocked" || t.state === "failed") && seenTasks[t.id] !== t.version).length;
+  const openTask = (task: string) => setDrawer(task);
+  const showTasksOf = (agent: string) => { setFilters({ ...NO_FILTERS, assignee: agent }); setSelected(TASKS); };
 
   // Unread counts live in this browser: the number of messages seen per conversation.
   useEffect(() => {
@@ -190,9 +189,14 @@ function Hub({ me, onLogout }: { me: Me; onLogout: () => void }) {
         {section("Rooms", conversations.filter((c) => c.kind === "room"))}
         {section("My DMs", conversations.filter((c) => c.kind === "dm" && !c.observed))}
         {section("Agent DMs (observe)", conversations.filter((c) => c.observed), true)}
+        <button className="nav add" onClick={() => setDialog("room")}>+ New room</button>
         <h2>Everything</h2>
         <button className={`nav ${selected === ACTIVITY ? "on" : ""}`} onClick={() => setSelected(ACTIVITY)}>
           All activity
+        </button>
+        <button className={`nav ${selected === TASKS ? "on" : ""}`} onClick={() => setSelected(TASKS)}>
+          <span>Tasks</span>
+          {taskAlerts > 0 && <span className="badge" title="Blocked or failed tasks you have not opened">{taskAlerts}</span>}
         </button>
         <button className="nav logout" onClick={() => run(async () => { await api.logout(); onLogout(); })}>
           Log out
@@ -203,7 +207,11 @@ function Hub({ me, onLogout }: { me: Me; onLogout: () => void }) {
         <header>
           <h1>{conversationLabel(conversation, selected)}</h1>
           {conversation?.observed && <span className="tag">read-only</span>}
-          {conversation?.kind === "room" && (
+          {conversation?.archived_at && <span className="tag">archived</span>}
+          {conversation?.kind === "room" && !conversation.archived_at && (
+            <button onClick={() => setDialog("members")}>Room settings</button>
+          )}
+          {conversation?.kind === "room" && !conversation.archived_at && (
             <label>
               mode{" "}
               <select value={conversation.mode}
@@ -227,21 +235,44 @@ function Hub({ me, onLogout }: { me: Me; onLogout: () => void }) {
         </header>
         {error && <div className="error bar" onClick={() => setError("")}>{error}</div>}
         {settings.paused && <div className="bar">All agents are paused. No turns are handed out.</div>}
-        <MessageList messages={messages} names={names} conversations={conversations}
-          tagged={selected === ACTIVITY} onContinue={(id) => run(() => api.continueChain(id))} />
-        <Composer key={selected} conversation={conversation} activity={selected === ACTIVITY}
-          conversations={conversations} names={names} onSelect={setSelected}
-          onSend={(body) => run(() => api.post(selected, body))} />
+        {dialog === "room" && (
+          <RoomDialog agents={agents} run={run} onDone={(room) => {
+            setDialog(null);
+            if (room) { void loadConversations(); setSelected(room); }
+          }} />
+        )}
+        {dialog === "members" && conversation?.kind === "room" && (
+          <RoomMembers room={conversation} agents={agents} run={run} onDone={() => { setDialog(null); void loadConversations(); }} />
+        )}
+        {selected === TASKS ? (
+          <TaskBoard tasks={tasks} conversations={conversations} agents={agents} names={names} filters={filters}
+            onFilters={setFilters} onOpen={openTask} run={run} />
+        ) : (
+          <>
+            <MessageList messages={messages} names={names} conversations={conversations}
+              tagged={selected === ACTIVITY} onContinue={(id) => run(() => api.continueChain(id))} onOpenTask={openTask} />
+            <Composer key={selected} conversation={conversation} activity={selected === ACTIVITY}
+              conversations={conversations} names={names} onSelect={setSelected}
+              onSend={(body) => run(() => api.post(selected, body))} />
+          </>
+        )}
       </main>
 
       <aside className="right">
-        <h2>Agents</h2>
-        {agents.map((a) => (
-          <AgentCard key={a.id} agent={a} selected={a.id === agentId} run={run}
-            onSelect={() => setAgentId(a.id === agentId ? null : a.id)} />
-        ))}
-        {agents.length === 0 && <p className="muted">No agents in agents.yaml.</p>}
-        {agent && <TracePanel agent={agent} trace={trace} />}
+        {drawer ? (
+          <TaskDrawer taskId={drawer} conversations={conversations} names={names} version={drawerTick} run={run}
+            onOpen={openTask} onClose={() => setDrawer(null)} onSeen={markSeen} />
+        ) : (
+          <>
+            <h2>Agents</h2>
+            {agents.map((a) => (
+              <AgentCard key={a.id} agent={a} selected={a.id === agentId} run={run}
+                onSelect={() => setAgentId(a.id === agentId ? null : a.id)} onTasks={() => showTasksOf(a.id)} />
+            ))}
+            {agents.length === 0 && <p className="muted">No agents in agents.yaml.</p>}
+            {agent && <TracePanel agent={agent} trace={trace} tasks={tasks} onOpenTask={openTask} />}
+          </>
+        )}
       </aside>
     </div>
   );
@@ -249,9 +280,9 @@ function Hub({ me, onLogout }: { me: Me; onLogout: () => void }) {
 
 function MessageList(props: {
   messages: Message[]; names: Record<string, string>; conversations: Conversation[]; tagged: boolean;
-  onContinue: (id: string) => void;
+  onContinue: (id: string) => void; onOpenTask: (task: string) => void;
 }) {
-  const { messages, names, conversations, tagged, onContinue } = props;
+  const { messages, names, conversations, tagged, onContinue, onOpenTask } = props;
   const box = useRef<HTMLDivElement>(null);
   const pinned = useRef(true);
   useEffect(() => {
@@ -268,6 +299,20 @@ function MessageList(props: {
         const where = tagged && (
           <span className="tag">{conversationLabel(conversations.find((c) => c.id === m.conversation_id), m.conversation_id)}</span>
         );
+        if (m.kind === "task" && m.task) {
+          // A task change: one compact line naming the actor, with a link that opens the task.
+          const task = m.task;
+          const rest = m.body.replace(task.ref, "\u0000").split("\u0000");
+          return (
+            <div key={m.id} className="task-line">
+              <span aria-hidden="true">▣</span>
+              {where}
+              <span>{rest[0]}<button className="link" onClick={() => onOpenTask(task.id)}>{task.ref}</button>{rest.slice(1).join(task.ref)}</span>
+              <time className="muted" dateTime={m.at}>{time(m.at)}</time>
+              {m.hop > 0 && <span className="muted small">hop {m.hop}</span>}
+            </div>
+          );
+        }
         if (m.kind === "notice") {
           return (
             <div key={m.id} className="notice">
@@ -301,8 +346,8 @@ function Composer(props: {
   const [caret, setCaret] = useState(0);
   const [pick, setPick] = useState(0);
   const input = useRef<HTMLTextAreaElement>(null);
-  const readOnly = activity || !conversation || conversation.observed;
-  const targets = conversations.filter((c) => !c.observed);
+  const readOnly = activity || !conversation || conversation.observed || !!conversation.archived_at;
+  const targets = conversations.filter((c) => !c.observed && !c.archived_at);
 
   // "@" autocomplete for the members of a room.
   const match = conversation?.kind === "room" ? /(^|\s)@([\w-]*)$/.exec(text.slice(0, caret)) : null;
@@ -371,9 +416,10 @@ function Composer(props: {
 }
 
 function AgentCard(props: {
-  agent: Agent; selected: boolean; onSelect: () => void; run: (action: () => Promise<unknown>) => Promise<void>;
+  agent: Agent; selected: boolean; onSelect: () => void; onTasks: () => void;
+  run: (action: () => Promise<unknown>) => Promise<void>;
 }) {
-  const { agent, selected, onSelect, run } = props;
+  const { agent, selected, onSelect, onTasks, run } = props;
   const [editing, setEditing] = useState(false);
   const [usd, setUsd] = useState(String(agent.budget.usd_per_day ?? ""));
   const [turns, setTurns] = useState(String(agent.budget.turns_per_day ?? ""));
@@ -401,6 +447,11 @@ function AgentCard(props: {
         {limit && ` · limit ${limit}`}
         {agent.queued > 0 && ` · ${agent.queued} queued`}
       </div>
+      {agent.open_tasks > 0 && (
+        <button className="link small" onClick={onTasks}>
+          {agent.open_tasks} open task{agent.open_tasks > 1 ? "s" : ""}
+        </button>
+      )}
       {!agent.has_token && <div className="error small">No token. Run: agent-hub token {agent.id}</div>}
       {agent.modes.length > 0 && (
         <label className="row small mode" title="How much this agent may do without asking you. Applies from its next turn.">
@@ -454,7 +505,10 @@ function traceLine(event: TraceEvent): string {
   return `${event.type}: ${text(payload)}`;
 }
 
-function TracePanel({ agent, trace }: { agent: Agent; trace: Trace | null }) {
+function TracePanel({ agent, trace, tasks, onOpenTask }: {
+  agent: Agent; trace: Trace | null; tasks: Task[]; onOpenTask: (task: string) => void;
+}) {
+  const task = trace?.turn.task_id ? tasks.find((t) => t.id === trace.turn.task_id) : undefined;
   return (
     <section className="trace">
       <h2>Trace: {agent.display_name}</h2>
@@ -465,6 +519,7 @@ function TracePanel({ agent, trace }: { agent: Agent; trace: Trace | null }) {
             {trace.turn.state} in {trace.turn.conversation_id}
             {trace.turn.error && ` (${trace.turn.error})`}
             {trace.turn.cost_usd != null && ` · $${trace.turn.cost_usd.toFixed(4)}`}
+            {task && <> · about <button className="link" onClick={() => onOpenTask(task.id)}>{task.ref}</button></>}
           </p>
           {trace.events.length === 0 && <p className="muted small">Nothing recorded for this turn.</p>}
           <ol>

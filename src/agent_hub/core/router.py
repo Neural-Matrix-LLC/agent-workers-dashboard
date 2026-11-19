@@ -52,3 +52,37 @@ def decide(*, sender: str, sender_is_owner: bool, kind: str, mode: str, members:
     if mode == "moderated" and moderator in others:
         return Plan([moderator])
     return Plan()
+
+
+# Task events (design M4 section 7.2). `decide` is never called on a task message, so text inside a task
+# title or result can never wake anyone by accident; only this table decides.
+TASK_EVENTS = ("created", "claimed", "assigned", "unassigned", "released", "state", "reopened", "note",
+               "edited", "artifact", "children_done")
+
+
+def decide_task(*, event: str, actor: str, creator: str, assignee: str | None = None,
+                previous_assignee: str | None = None, coordinator: str | None = None, to_state: str | None = None,
+                note_mentions: list[str] = (), agents: list[str], wake_creator_on: list[str] = (),
+                exclude: list[str] = ()) -> Plan:
+    """Targets for one task event. `agents` are the agent members of the task's home conversation, so the
+    owner and the hub are never woken. The actor (and anyone in `exclude`) is never woken."""
+    targets: list[str | None] = []
+    if event in ("created", "assigned", "reopened", "children_done"):
+        targets = [assignee]
+    elif event == "unassigned":
+        targets = [previous_assignee]
+    elif event == "released":
+        targets = [creator] if "released" in wake_creator_on else []
+    elif event == "state":
+        if to_state in ("blocked", "done", "failed"):
+            targets = [creator] if to_state in wake_creator_on else []
+            targets.append(coordinator)
+        elif to_state == "cancelled":
+            targets = [assignee]
+    elif event == "note":
+        targets = list(note_mentions)
+    found = []
+    for target in targets:
+        if target and target in agents and target != actor and target not in exclude and target not in found:
+            found.append(target)
+    return Plan(found)

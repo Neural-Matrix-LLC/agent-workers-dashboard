@@ -26,6 +26,19 @@ def conversation_filter(viewer: Participant, column: str = "c.id") -> tuple[str,
     return f"{column} IN (SELECT conversation_id FROM members WHERE participant_id = ?)", [viewer.id]
 
 
+def task_filter(viewer: Participant, alias: str = "t") -> tuple[str, list]:
+    """A task is readable exactly when its home conversation is (design M4 section 6)."""
+    return conversation_filter(viewer, f"{alias}.conversation_id")
+
+
+def artifact_filter(viewer: Participant, alias: str = "a") -> tuple[str, list]:
+    """An artifact is readable when its task's conversation is. Deleted artifacts are hidden from agents."""
+    clause, params = conversation_filter(viewer, f"{alias}.conversation_id")
+    if not viewer.is_owner:
+        clause += f" AND {alias}.deleted_at IS NULL"
+    return clause, params
+
+
 def message_filter(viewer: Participant, alias: str = "m") -> tuple[str, list]:
     """SQL condition for message rows. Notices (hop limit, budget) are for the owner only."""
     clause, params = conversation_filter(viewer, f"{alias}.conversation_id")

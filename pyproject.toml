@@ -12,6 +12,7 @@ dependencies = [
     "httpx>=0.27",
     "mcp>=1.14,<2",
     "python-ulid>=3",
+    "python-multipart>=0.0.20",   # task file uploads (multipart/form-data)
 ]
 
 [project.scripts]
@@ -44,4 +45,4 @@ target-version = "py313"
 select = ["E", "F", "W", "I", "B", "UP", "ASYNC"]
 
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["fastapi.Depends"]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]

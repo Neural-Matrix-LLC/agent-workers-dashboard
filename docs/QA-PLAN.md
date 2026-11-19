@@ -31,7 +31,7 @@ Run on any machine with the repo:
 
 ```
 uv sync
-uv run pytest          # 88 tests
+uv run pytest          # 204 tests, including the task and room tests of the M4 plan
 uv run ruff check .    # lint
 (cd web && npx tsc --noEmit && npm run build)
 ```
@@ -151,10 +151,12 @@ first; it uses port 8700.
 
 These are known and not to be reported as bugs:
 
-- Shared tasks and a task board (milestone M4 in the [design](AGENT-HUB-DESIGN.md#13-milestones)).
 - A per-conversation "thinking" indicator. The UI shows each agent's status only.
 - A per-token rate limit on `/mcp`. It was meant for a public route, which is not used.
-- The A2A gateway, Claude Code channels, Redis, and more than one room (milestone M5).
+- The A2A gateway, Claude Code channels, and Redis (M5a to M5c).
+
+Shared tasks, task files, the task board, and multiple rooms are built; their checks are in
+[QA plan: tasks and rooms](QA-PLAN-M4.md).
 
 ## Reporting
 

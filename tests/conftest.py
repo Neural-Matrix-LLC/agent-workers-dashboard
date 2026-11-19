@@ -56,7 +56,8 @@ class Env:
             return True, text
         structured = result.get("structuredContent")
         if structured is not None:
-            return False, structured.get("result", structured)
+            # FastMCP wraps a non-object result as {"result": ...}; an object result comes as it is.
+            return False, structured["result"] if set(structured) == {"result"} else structured
         return False, json.loads(text) if text else None
 
     async def login(self) -> None:

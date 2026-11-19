@@ -35,6 +35,30 @@ TOOLS = [
     tool("send_dm", "Post to your direct-message conversation with a participant.",
          {"to": TEXT, "body": TEXT}, ["to", "body"]),
 ]
+TASK_TOOLS = [
+    tool("create_task", "Create a task in a conversation you belong to; give an assignee to hand it over.",
+         {"conversation_id": TEXT, "title": TEXT, "description": TEXT, "acceptance": TEXT, "assignee": TEXT,
+          "parent_id": TEXT, "priority": {"type": "string", "enum": ["low", "normal", "high"]},
+          "labels": {"type": "array", "items": TEXT}}, ["conversation_id", "title"]),
+    tool("claim_task", "Take an open, unassigned task.", {"task_id": TEXT}, ["task_id"]),
+    tool("update_task", "Change a task with one action: start, block, unblock, finish, fail, release, assign, "
+         "unassign, cancel, reopen, note, edit.",
+         {"task_id": TEXT, "action": TEXT, "note": TEXT, "result": TEXT, "blocked_reason": TEXT, "assignee": TEXT,
+          "fields": {"type": "object"}, "cascade": {"type": "boolean"}, "expected_version": {"type": "integer"}},
+         ["task_id", "action"]),
+    tool("list_tasks", "Tasks you can see. assignee may be 'me'.",
+         {"conversation_id": TEXT, "assignee": TEXT, "state": TEXT, "parent_id": TEXT,
+          "include_closed": {"type": "boolean"}, "limit": {"type": "integer"}, "before": TEXT}),
+    tool("get_task", "One task with its history, subtasks, and files.", {"task_id": TEXT}, ["task_id"]),
+    tool("attach_artifact", "Attach a file (up to 1 MiB) to a task. encoding utf8 or base64.",
+         {"task_id": TEXT, "name": TEXT, "content": TEXT, "encoding": TEXT, "media_type": TEXT,
+          "description": TEXT, "supersedes": TEXT}, ["task_id", "name", "content"]),
+    tool("read_artifact", "Read a file attached to a task, in chunks; continue from next_offset.",
+         {"artifact_id": TEXT, "offset": {"type": "integer"}, "limit": {"type": "integer"}}, ["artifact_id"]),
+]
+
+
+TASK_NAMES = {t["function"]["name"] for t in TASK_TOOLS}
 
 
 class OpenAICompatConnector(Connector):
@@ -56,9 +80,40 @@ class OpenAICompatConnector(Connector):
                                               json={"body": args["body"], "reply_to": args.get("reply_to")})
         elif name == "send_dm":
             response = await self.client.post(f"{api}/dm/{args['to']}", json={"body": args["body"]})
+        elif name in TASK_NAMES and self.agent.task_tools:
+            response = await self._task_tool(name, args)
         else:
             return {"error": f"unknown tool: {name}"}
+        if name == "read_artifact" and response.status_code in (200, 206):
+            return {"artifact_id": args["artifact_id"], "content": response.text,
+                    "range": response.headers.get("content-range")}
         return response.json()
+
+    async def _task_tool(self, name: str, args: dict) -> httpx.Response:
+        """The task tools, mapped to the REST mirrors under /agent/v1 (design M4 section 10.2)."""
+        api = "/agent/v1"
+        if name == "create_task":
+            return await self.client.post(f"{api}/tasks", json=args)
+        if name == "claim_task":
+            return await self.client.post(f"{api}/tasks/{args['task_id']}/claim")
+        if name == "update_task":
+            body = {k: v for k, v in args.items() if k != "task_id"}
+            return await self.client.patch(f"{api}/tasks/{args['task_id']}", json=body)
+        if name == "list_tasks":
+            return await self.client.get(f"{api}/tasks", params={k: v for k, v in args.items() if v is not None})
+        if name == "get_task":
+            return await self.client.get(f"{api}/tasks/{args['task_id']}")
+        if name == "attach_artifact":
+            body = {k: v for k, v in args.items() if k != "task_id"}
+            return await self.client.post(f"{api}/tasks/{args['task_id']}/artifacts", json=body)
+        # read_artifact: metadata, then the requested slice of the content
+        artifact = args["artifact_id"]
+        offset, limit = int(args.get("offset") or 0), int(args.get("limit") or 262_144)
+        return await self.client.get(f"{api}/artifacts/{artifact}/content",
+                                     headers={"Range": f"bytes={offset}-{offset + limit - 1}"})
+
+    def tools(self) -> list[dict]:
+        return TOOLS + TASK_TOOLS if self.agent.task_tools else TOOLS
 
     async def run_turn(self, wake: Wake, trace: TraceSink) -> TurnResult:
         options = self.options
@@ -75,7 +130,7 @@ class OpenAICompatConnector(Connector):
             for round in range(int(options.get("max_tool_rounds", 8)) + 1):
                 request = {"model": options["model"], "messages": [{"role": "system", "content": system}, *history]}
                 if round < int(options.get("max_tool_rounds", 8)):
-                    request["tools"] = TOOLS              # the last round must answer in text
+                    request["tools"] = self.tools()       # the last round must answer in text
                 if options.get("temperature") is not None:
                     request["temperature"] = options["temperature"]
                 response = await llm.post(options["api_base"].rstrip("/") + "/chat/completions", json=request)

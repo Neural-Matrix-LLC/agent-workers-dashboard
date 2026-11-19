@@ -6,9 +6,10 @@ anyone, and the owner can read every conversation, including DMs between agents.
 
 It is one server process, the **hub**, with three parts:
 
-- **Chat UI** for the owner: the room, DMs, agent-to-agent DMs (read-only), and an "All activity" view. The
-  hub serves it from `web/dist` on its own address and port; no separate UI server is needed.
-- **Agent API**: six MCP tools at `/mcp`, plus the same calls as plain HTTP under `/agent/v1/`.
+- **Chat UI** for the owner: rooms, DMs, agent-to-agent DMs (read-only), an "All activity" view, and a task
+  board. The hub serves it from `web/dist` on its own address and port; no separate UI server is needed.
+- **Agent API**: thirteen MCP tools at `/mcp` (six for chat, seven for shared tasks and their files), plus
+  the same calls as plain HTTP under `/agent/v1/`.
 - **Connectors**: one small process per agent that wakes its harness for a turn and posts the reply. An
   agent that cannot be called from outside (Grok Bot) needs no connector; the hub pings its webhook.
 
@@ -159,8 +160,11 @@ Uncomment the `echo` agent at the end of `agents.yaml`, set `HUB_ECHO_TOKEN`, an
   coding agent a narrow `allowed_tools` list and its own working tree. The hub stops agent-to-agent chains
   at `max_hops` (default 8), and approval mode makes every agent-to-agent wake wait for the owner.
 - **DMs are not private from the owner.** Every agent is told so in its prompt and in the MCP instructions.
-- **Secrets stay in `.env`**, never in `agents.yaml` or in a chat message. `.env`, `agents.yaml`, and the
-  database file are ignored by git.
+- **Secrets stay in `.env`**, never in `agents.yaml`, a chat message, a task, or a task file. `.env`,
+  `agents.yaml`, the database file, and the task file store (`artifacts/`) are ignored by git. Task text and
+  files are scanned for secrets and refused on a match, but the scan is a safety net, not a guarantee.
+- **Back up the database and `artifacts/` together.** The first start after an upgrade migrates the
+  database and keeps a copy first (`agent-hub.db.bak-v1-<time>`).
 - **Claude asks before it pushes.** Every `git push` waits for your Allow on Claude's card, pushes to
   `main`/`master` and force pushes are refused, and `.env` files cannot be read. Shell commands run in the
   Claude Code sandbox, which needs `bubblewrap` and `socat` installed. Without them the Claude connector
@@ -182,6 +186,11 @@ Uncomment the `echo` agent at the end of `agents.yaml`, set `HUB_ECHO_TOKEN`, an
   `openai-compat`, keeping everything running with systemd, and adding another harness.
 - [QA plan](docs/QA-PLAN.md): what the automated tests cover, and the acceptance checks to run by hand
   before release, including the ones not yet run (sandbox, ml3060, real Hermes and Grok Bot).
+- [QA plan: tasks and rooms](docs/QA-PLAN-M4.md): the checks for shared tasks, task files, the task board,
+  and multiple rooms (M4 and M5d).
+- [M4 and M5 design](docs/M4-M5-DESIGN.md): shared tasks, task files, and the task board (M4, built), and the
+  optional M5 packages: multiple rooms (M5d, built), A2A gateway, Claude Code channels, Redis (not built).
+  Section 24 lists what is built and where the code differs.
 - [Grok Bot test driver](docs/GROK-BOT-TEST-DRIVER.md): the stub used to check Grok Bot connectivity before
   the hub existed. It is still useful for testing a new Grok Bot connector or webhook routine in isolation.
 - Skills (standing instructions for each agent):

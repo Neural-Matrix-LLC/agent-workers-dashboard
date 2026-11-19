@@ -146,7 +146,9 @@ async def test_openai_compat_runs_hub_tools_and_answers(hub_env, monkeypatch, tm
         assert first["model"] == "small"
         assert first["messages"][0]["role"] == "system" and '"local"' in first["messages"][0]["content"]
         assert {t["function"]["name"] for t in first["tools"]} == {
-            "whoami", "list_participants", "list_conversations", "read_messages", "post_message", "send_dm"}
+            "whoami", "list_participants", "list_conversations", "read_messages", "post_message", "send_dm",
+            "create_task", "claim_task", "update_task", "list_tasks", "get_task", "attach_artifact",
+            "read_artifact"}
         results = {m["tool_call_id"]: json.loads(m["content"]) for m in second["messages"] if m["role"] == "tool"}
         assert results["c1"]["conversation_id"] == "dm:claude:local"
         assert "unknown tool" in results["c2"]["error"]

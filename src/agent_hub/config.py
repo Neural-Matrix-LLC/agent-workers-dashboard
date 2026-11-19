@@ -29,6 +29,8 @@ class Budget(BaseModel):
     turns_per_conversation: int | None = None
 
 
+RESERVED_IDS = ("owner", "all", "hub")
+
 # Claude Code permission modes the owner can pick for a claude-code agent. bypassPermissions is never allowed.
 CLAUDE_MODES = ("plan", "manual", "acceptEdits", "auto")
 DEFAULT_MODE = "plan"
@@ -47,6 +49,7 @@ class AgentConfig(BaseModel):
     webhook_key_env: str | None = None
     turn_timeout: float = 600
     budget: Budget = Budget()
+    task_tools: bool = True          # false hides the seven task tools from this agent
 
     @field_validator("turn_timeout", mode="before")
     @classmethod
@@ -56,7 +59,7 @@ class AgentConfig(BaseModel):
     @field_validator("id")
     @classmethod
     def _reserved(cls, value):
-        if value in ("owner", "all"):
+        if value in RESERVED_IDS:
             raise ValueError(f"'{value}' is a reserved id")
         return value
 
@@ -92,6 +95,9 @@ class AgentConfig(BaseModel):
         return dict(self.model_extra or {})
 
 
+ROOM_ID = re.compile(r"^room:[a-z0-9][a-z0-9-]{0,31}$")
+
+
 class RoomConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = "room:main"
@@ -99,6 +105,40 @@ class RoomConfig(BaseModel):
     mode: Literal["mention", "round_robin", "moderated"] = "mention"
     fanout: Literal["sequential", "parallel"] = "sequential"
     moderator: str | None = None
+    members: list[str] | None = None     # agent ids; None means every agent. The owner is always a member.
+
+    @field_validator("id")
+    @classmethod
+    def _room_id(cls, value):
+        if not ROOM_ID.match(value):
+            raise ValueError(f"room id {value!r} must look like room:<slug> (a-z, 0-9, -; up to 32 characters)")
+        return value
+
+
+class TaskLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_depth: int = 3                   # parent -> child -> grandchild -> great-grandchild
+    max_children: int = 20
+    max_open_per_agent: int = 20
+    max_open_per_conversation: int = 200
+    max_creates_per_turn: int = 10
+    max_reassignments: int = 5
+    wake_creator_on: list[Literal["blocked", "done", "failed", "released"]] = ["blocked", "done", "failed"]
+
+
+DEFAULT_MEDIA_TYPES = ["text/plain", "text/markdown", "text/csv", "text/x-diff", "application/json",
+                       "application/x-yaml", "application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp"]
+
+
+class ArtifactLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_bytes: int = 10 * 1024 * 1024           # per file over HTTP
+    max_inline_bytes: int = 1024 * 1024         # per file through the MCP tool
+    max_task_bytes: int = 50 * 1024 * 1024
+    max_store_bytes: int = 2 * 1024 * 1024 * 1024
+    max_per_task: int = 50
+    secret_scan: Literal["reject", "off"] = "reject"
+    media_types: list[str] = DEFAULT_MEDIA_TYPES
 
 
 class Limits(BaseModel):
@@ -109,12 +149,15 @@ class Limits(BaseModel):
     approval_mode: bool = False      # agent-to-agent wakes wait for the owner
     webhook_retries: int = 3
     webhook_backoff: float = 2.0     # seconds; doubles on each retry
+    tasks: TaskLimits = TaskLimits()
+    artifacts: ArtifactLimits = ArtifactLimits()
 
 
 class HubSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     bind: str | list[str] = "127.0.0.1:8700"   # one "host:port", or a list to listen on several
     db: str = "./agent-hub.db"
+    artifacts_dir: str | None = None # default: "artifacts" next to the database
     url: str | None = None           # address connectors dial; default http://<first bind>
     owner_name: str = "Owner"
 
@@ -134,6 +177,12 @@ class HubSection(BaseModel):
     def binds(self) -> list[tuple[str, int]]:
         items = [self.bind] if isinstance(self.bind, str) else self.bind
         return [(item.rpartition(":")[0].strip("[]"), int(item.rpartition(":")[2])) for item in items]
+
+    @property
+    def artifacts_path(self) -> Path:
+        if self.artifacts_dir:
+            return Path(self.artifacts_dir).expanduser()
+        return Path(self.db).expanduser().resolve().parent / "artifacts"
 
     @property
     def base_url(self) -> str:
@@ -164,6 +213,15 @@ class Config(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("agent ids must be unique")
         return agents
+
+    def model_post_init(self, _context) -> None:
+        ids = {a.id for a in self.agents}
+        if len({r.id for r in self.rooms}) != len(self.rooms):
+            raise ValueError("room ids must be unique")
+        for room in self.rooms:
+            unknown = [m for m in room.members or [] if m not in ids]
+            if unknown:
+                raise ValueError(f"room {room.id} lists unknown agents: {', '.join(unknown)}")
 
 
 def load_dotenv(path: Path) -> None:
@@ -198,4 +256,6 @@ def load_config(path: str | Path | None = None) -> Config:
     db = Path(config.hub.db).expanduser()
     if not db.is_absolute():
         config.hub.db = str(path.resolve().parent / db)
+    if config.hub.artifacts_dir and not Path(config.hub.artifacts_dir).expanduser().is_absolute():
+        config.hub.artifacts_dir = str(path.resolve().parent / config.hub.artifacts_dir)
     return config

@@ -189,7 +189,7 @@ A usual sequence: **Plan** → read the plan, answer its questions → switch to
 | Protection | How |
 |---|---|
 | Only `/home/thomas/projects` | `workdir` is the working directory. File tools outside it need permission, which reaches your card. With the sandbox, shell commands can write only inside `workdir` and temp folders. |
-| No secrets | `.env` and `.env.*` anywhere cannot be read or edited, and `~/.ssh`, `~/.aws`, and `~/.config/gh` cannot be read by sandboxed commands. The hub's `agents.yaml`, `.env`, and database, and the connector's state (it holds Claude's hub token), are blocked for Claude's tools. The connector also removes hub tokens and webhook keys from Claude's environment. |
+| No secrets | `.env` and `.env.*` anywhere cannot be read or edited, and `~/.ssh`, `~/.aws`, and `~/.config/gh` cannot be read by sandboxed commands. The hub's `agents.yaml`, `.env`, database, and task file store (`artifacts/`), and the connector's state (it holds Claude's hub token), are blocked for Claude's tools, so Claude reads task files only through the hub, under the hub's visibility rules. The connector also removes hub tokens and webhook keys from Claude's environment. |
 | Safe git | `git push --force`, `-f`, `--force-with-lease`, and any push to `main` or `master` (including `HEAD:main`) are denied. Every other push asks. |
 | No root | `sudo` is denied. |
 | Hub tasks only | The skill loads only in hub turns (`--plugin-dir`), and only owner messages count as instructions. |
@@ -405,6 +405,33 @@ Replies with what it received. For trying the hub and the UI without spending an
   connector: echo
   reply: "echo from {agent}: {body}"   # optional template
 ```
+
+## Shared tasks for every agent
+
+Every agent gets seven task tools next to the six chat tools: `create_task`, `claim_task`, `update_task`,
+`list_tasks`, `get_task`, `attach_artifact`, and `read_artifact` (Claude Code sees them as
+`mcp__hub__*`, Hermes as `mcp_hub_*`; the `openai-compat` connector offers them as function calls). The
+skills tell each agent how to use them. How tasks look to you is in
+[Using the chat UI: tasks](USING-THE-UI.md#tasks), and the full design is in
+[M4 and M5 design](M4-M5-DESIGN.md).
+
+- **Turn them off for an agent** that does not need them (each tool costs prompt space in every turn):
+
+  ```yaml
+  agents:
+    - id: local
+      connector: openai-compat
+      task_tools: false
+  ```
+
+  The tools then disappear from its tool list and calls are refused with `not_enabled`.
+- **Files** are stored in `artifacts/` next to the database (set `hub.artifacts_dir` to move it). Back it
+  up with the database. Agents on other machines reach files only through the hub API.
+- **Limits** (`limits.tasks` and `limits.artifacts` in `agents.yaml`) are shown, with their defaults, in
+  `agents.example.yaml`.
+- **Upgrading from an earlier version:** the hub migrates the database on its first start and keeps a
+  copy first, named `agent-hub.db.bak-v1-<time>`. An agent named `hub` must be renamed: `hub` is now
+  reserved for the hub's own task messages.
 
 ## Adding another harness
 

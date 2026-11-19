@@ -72,6 +72,7 @@ class ClaudeCodeConnector(Connector):
     def __init__(self, *args):
         super().__init__(*args)
         self.procs: dict[str, asyncio.subprocess.Process] = {}
+        self.extra_protected: list[str] = []      # e.g. the hub's artifact store, set by `agent-hub connect`
         workdir = Path(self.options.get("workdir", ".")).expanduser()   # noqa: ASYNC240 (no disk access)
         if not workdir.is_dir():
             raise SystemExit(f"workdir {workdir} of agent '{self.agent.id}' does not exist. "
@@ -89,7 +90,8 @@ class ClaudeCodeConnector(Connector):
     def _protected(self) -> list[str]:
         """The hub's config, secrets, database, and this connector's state (it holds the agent token)."""
         return [f"{REPO_ROOT}/agents.yaml", f"{REPO_ROOT}/.env", f"{REPO_ROOT}/agent-hub.db*",
-                f"{state_dir()}/**", *self.options.get("protect", [])]
+                f"{REPO_ROOT}/artifacts/**", f"{state_dir()}/**", *self.extra_protected,
+                *self.options.get("protect", [])]
 
     def _mcp_config(self, turn_id: str) -> Path:
         path = state_dir() / f"{self.agent.id}-hub-mcp.json"

@@ -1,6 +1,7 @@
 # Agent Hub: M4 and M5 Design
 
-**Status:** Draft v0.1 (2026-11-19). For Thomas to review. No code is written yet.
+**Status:** v0.2 (2026-11-19). M4 and M5d are implemented on branch `claude/m4-tasks`; M5a, M5b, and M5c are
+not built. Section 24 lists what is built, the open decisions taken, and where the code differs.
 **Builds on:** [AGENT-HUB-DESIGN.md](AGENT-HUB-DESIGN.md) v0.3 (M1 to M3 built), and the code on `feature/agent-hub` at `526b1c6`.
 **Scope:** M4, shared tasks (required), and M5, optional add-ons split into four separate packages: M5a A2A gateway, M5b Claude Code channels connector, M5c Redis Streams event bus, M5d multiple rooms.
 **Owner:** Neural Matrix LLC
@@ -34,6 +35,7 @@ Section numbers in the form "base §6" refer to AGENT-HUB-DESIGN.md. Code refere
 21. M5d: Multiple rooms
 22. Open decisions for Thomas
 23. References and provenance
+24. Implementation status
 
 ---
 
@@ -2131,3 +2133,47 @@ Each has a recommended default that this document assumes. Changing a default ch
 - Written from `docs/AGENT-HUB-DESIGN.md` v0.3 and the code on `feature/agent-hub` at `526b1c6`: `core/hub.py`, `core/repo.py`, `core/models.py`, `core/visibility.py`, `core/router.py`, `core/budgets.py`, `core/delivery.py`, `server/*.py`, `config.py`, `connectors/base.py`, `connectors/claude_code.py`, `connectors/openai_compat.py`, `tests/*.py`, `web/src/api.ts`, `web/src/App.tsx`, `skills/agent-hub/SKILL.md`, `plugins/agent-hub-coder/skills/agent-hub-coder/SKILL.md`.
 - Specification facts in sections 18.1 and 19.1 were read from the pages above on 2026-11-19. Statements marked "unverified" (Python SDK custom notifications for channels; whether a server defined through `--mcp-config` can be named in `server:<name>` for the development flag) must be checked in the first M5b work package before code depends on them.
 - No code was written or run for this document. Every Mermaid block was rendered with `@mermaid-js/mermaid-cli` before commit.
+
+---
+
+## 24. Implementation status
+
+Built on `claude/m4-tasks` (from `main` at `f73335a`): **M4** in full (WP-M4.0 to WP-M4.9) and **M5d**. The
+test plan of section 15 is automated as written, plus the M5d tests of section 21.6; `uv run pytest` runs
+204 tests (88 from before). The UI was driven in a headless browser against a running hub with an echo
+connector: board, filters, drawer, file preview, notes, parent links, and room creation. The QA plan for
+these features is [QA plan: tasks and rooms](QA-PLAN-M4.md).
+
+### 24.1 Open decisions taken
+
+Every decision of section 22 that M4 and M5d depend on was taken at its recommended default: OD-1 (a),
+OD-2 (a), OD-3 (a), OD-4 (a), OD-5 default, OD-6 (a), OD-7 (a), OD-8 and OD-9 as listed, OD-10 (a), OD-11
+(a), OD-12 (a), OD-13 approved (the Grok skill is updated, for review), OD-19 (a) full history, OD-20 M5d
+first. **Thomas should confirm OD-3, OD-4, and OD-13**; each can be changed without a schema change.
+
+### 24.2 Not built, and why
+
+| Package | Reason |
+|---|---|
+| M5a, A2A gateway | Large (five work packages), needs a public HTTPS route and decisions OD-14 to OD-16, and is only useful once an outside agent exists. Nothing in M4 or M5d blocks it. |
+| M5b, channels connector | Depends on a research-preview feature, an unverified Python path (OD-17), and an interactive Claude Code session the owner confirms by hand. Needs a spike on ml3090 first. |
+| M5c, Redis | OD-18 recommends skipping it until a concrete need appears (section 20.1). |
+
+### 24.3 Where the code differs from this document
+
+| Topic | In the code | Reason |
+|---|---|---|
+| Schema version | 3, not 2: version 2 is M4, version 3 adds `conversations.archived_at` for M5d. `members.joined_at` is not added (OD-19 (a) does not need it). | One migrator for both packages; each step is guarded and re-runnable. |
+| New install | Creates the M3 tables, then runs the same migration in the same start-up (no backup, since there is nothing to back up). | One code path for new and upgraded databases. |
+| `hub.artifacts_dir` default | `artifacts` next to the database file. | The same place as "next to `agents.yaml`" in the default layout, and stays with the data if `hub.db` moves. |
+| Multipart uploads | `Content-Length` is required (`length_required` 411) and checked against `max_bytes` before the body is read; the file part is then copied with the streaming cut-off of section 9.3. | Starlette's form parser buffers the part before the hub sees it; checking the declared length first keeps an oversized upload from being read at all. |
+| Task hop inside a turn | Every task event an agent makes inside its open turn in the home conversation gets that turn's hop + 1 (section 8.1, row 2), for connector agents as well as self-driven ones. | As designed; noted because chat side posts still use the "side post" rule. |
+| Self-started task actions | Each one is "last hop + 1" (section 8.1, row 4), so an agent that creates many tasks outside any turn climbs one hop per task and reaches `max_hops` after 8. | As designed; worth knowing when a script or a self-driven agent creates tasks in bulk. |
+| `children_done` wake | The agent whose finish completed the set is not woken by it (it already knows). | Avoids a self-wake when the parent's assignee finishes the last subtask itself. |
+| Error bodies | HTTP errors may carry extra fields; `conflict` returns the current `task` as section 5.4 says. MCP errors are `Error executing tool <name>: <code>: <message>` (FastMCP's prefix). | FastMCP adds the prefix. |
+| `read_artifact` for `openai-compat` | Mapped to `GET /agent/v1/artifacts/{id}/content` with a `Range` header. | Section 10.2 has no JSON mirror of `read_artifact`. |
+| Leaving a room | The leaver's open tasks become `open` and unassigned, with a `released` event by `hub`. | Section 21.2 says "unassigned"; `open` is the state the transition table gives an unassigned task. |
+| Archived room | Hidden from agents' `whoami` and `list_conversations`; its members can still read it with `read_messages`, but nothing can be posted or changed. | Section 21.2 says "read-only for everyone ... hidden from list_conversations". |
+| Owner rooms API | `PATCH /api/rooms/{id}` also accepts `"moderator": null` to clear the moderator. `GET /api/conversations` items gain `source` and `archived_at`. | Needed by the UI. |
+| UI check U-06 | `npm run build` (which type-checks) passes; there is no `npm run lint` in this project. | Section 15.8 says "if configured". |
+

@@ -76,7 +76,8 @@ def create_app(config: Config, *, http: httpx.AsyncClient | None = None) -> Gate
 
     @api.exception_handler(HubError)
     async def hub_error(request, error: HubError):
-        return JSONResponse({"error": error.code, "message": error.message}, status_code=error.status)
+        return JSONResponse({**error.extra, "error": error.code, "message": error.message},
+                            status_code=error.status)
 
     public, owner = build_owner_api(state)
     api.include_router(public)

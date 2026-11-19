@@ -45,6 +45,8 @@ def connect(args) -> None:
     if not token:
         sys.exit(f"Set {agent.token_env} to the agent's token. Create one with: agent-hub token {agent.id}")
     connector = CONNECTORS[agent.connector](agent, args.hub or config.hub.base_url, token)
+    if hasattr(connector, "extra_protected"):         # keep Claude out of the hub's artifact store
+        connector.extra_protected.append(f"{config.hub.artifacts_path}/**")
     try:
         asyncio.run(connector.serve())
     except KeyboardInterrupt:
