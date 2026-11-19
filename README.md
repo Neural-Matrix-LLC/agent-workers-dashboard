@@ -177,6 +177,8 @@ Uncomment the `echo` agent at the end of `agents.yaml`, set `HUB_ECHO_TOKEN`, an
 
 ## Documentation
 
+- [Current status](docs/CURRENT-STATUS.md): what is built, how it was checked, decisions to confirm, and
+  next steps (as of 2026-11-19).
 - [Using the chat UI](docs/USING-THE-UI.md): the screen, who answers a message, adding, changing, and
   removing agents, the owner's controls, and workflow examples.
 - [Agent Hub design](docs/AGENT-HUB-DESIGN.md): architecture, visibility rules, wake delivery, connectors,
